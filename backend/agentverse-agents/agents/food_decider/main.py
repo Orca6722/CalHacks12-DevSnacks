@@ -14,12 +14,20 @@ groq_client = Groq(api_key=GROQ_API_KEY)
 proto = Protocol(name="food-decider", version="1.0.0")
 
 SYS = (
-    "You are a decisive assistant that reads recent developer commit messages and "
-    "infers the developer's current mood. Pick ONE lowercase mood token from: "
-    "[focused, energized, meh, stressed, celebratory, calm]. "
-    "Then choose exactly ONE concrete food item that matches that mood for quick delivery. "
-    "Prefer universal dishes (e.g., 'margherita pizza', 'chicken burrito', 'poke bowl', "
-    "'ramen', 'sushi roll', 'greek salad', 'falafel wrap', 'pad thai', 'butter chicken', 'bibimbap'). "
+    "You read recent developer commit messages and infer the developer’s current mood "
+    "as a short, lowercase phrase (2–5 words), e.g., 'quietly focused', 'time-crunched and stressed', "
+    "'excited and celebratory', or 'calm and steady'. "
+    "Then choose exactly ONE concrete, orderable dish (a common menu item) that best fits that mood for quick delivery. "
+    "Important:\n"
+    "- Do NOT restrict choices to any example foods or mood that may appear in the prompt; examples are illustrative only.\n"
+    "- Use your broad, general food knowledge. Prefer widely available, delivery-friendly dishes.\n"
+    "- The dish must be a specific item (e.g., 'bibimbap', 'ramen', 'chicken burrito', 'greek salad'), not a cuisine or restaurant.\n"
+    "- Keep the name natural and concise (no emojis, no extra descriptors).\n\n"
+    "Heuristics examples:\n"
+    "- stressed / time-crunched → warm, comforting, or hearty food (e.g., noodles, burrito, curry + rice)\n"
+    "- celebratory / excited → festive or treat-like items (e.g., tacos, sushi rolls, cake, wings)\n"
+    "- focused / calm → light or steady-energy items (e.g., grain bowls, salads, poke, soba)\n"
+    "- tired / low-energy → simple, satisfying classics (e.g., pizza, sandwich, fried rice)\n\n"
     "Return STRICT JSON with keys: mood, food, reasoning. No extra text."
 )
 
@@ -27,10 +35,12 @@ USER_TEMPLATE = (
     "Commit messages (newest first):\n"
     "{bulleted}\n\n"
     "Rules:\n"
-    "- mood must be one token from the set.\n"
-    "- food must be a concrete, orderable dish (not a cuisine or restaurant).\n"
-    "- Keep reasoning 1–2 short sentences.\n"
-    "Output JSON only."
+    "- Infer a concise, lowercase mood phrase (2–5 words).\n"
+    "- Pick exactly ONE dish name that best matches the mood.\n"
+    "- Do NOT limit yourself to any examples mentioned in the prompt; use general food knowledge.\n"
+    "- The dish must be a concrete menu item (not a cuisine or restaurant).\n"
+    "- Keep reasoning to 1–2 short sentences.\n"
+    "Output JSON only with keys: mood, food, reasoning."
 )
 
 def _to_bulleted(commits: List[str]) -> str:
