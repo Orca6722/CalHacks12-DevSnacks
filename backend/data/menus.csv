@@ -1,0 +1,11 @@
+id,name,description,price,cuisine,dietary,tags,eta_min,restaurant
+menu_001,Tofu Rice Bowl,"Light, protein, soy-ginger glaze",12.5,Asian,"[\"vegan\"]","[\"light\",\"protein\",\"low_spice\"]",20,Sumi Kitchen
+menu_002,Miso Soup & Edamame,"Warm, soothing, not heavy",9.0,Japanese,"[\"vegan\"]","[\"light\",\"comfort\"]",15,Ichigo
+menu_003,Chicken Shawarma Wrap,"Savory, protein, quick",13.0,Middle Eastern,"[]","[\"protein\",\"savory\",\"quick\"]",18,Al-Amir
+menu_004,Salmon Poke Bowl,"Fresh, omega-3, clean fuel",15.0,Pacific,"[]","[\"light\",\"protein\",\"clean\"]",22,PokeGo
+menu_005,Thai Satay Skewers,"Peanut sauce, satisfying",12.0,Thai,"[]","[\"comfort\",\"protein\"]",25,Thai Time
+menu_006,Margherita Pizza (Small),"Classic, shareable",11.0,Italian,"[\"vegetarian\"]","[\"share\",\"comfort\"]",30,Bella Roma
+menu_007,Hummus Snack Box,"Crunchy veg + dip",8.5,Mediterranean,"[\"vegan\"]","[\"light\",\"snack\"]",12,Green Plate
+menu_008,Chicken Caesar Salad,"Greens + protein",12.0,American,"[]","[\"light\",\"protein\"]",18,Leaf & Fork
+menu_009,Spicy Tofu Ramen,"Comforting heat",13.5,Japanese,"[\"vegan\"]","[\"comfort\",\"spicy\"]",28,Ramen House
+menu_010,Veggie Burrito,"Hearty, budget-friendly",9.5,Mexican,"[\"vegetarian\"]","[\"comfort\",\"budget\"]",20,El Pueblo
