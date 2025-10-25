@@ -42,3 +42,12 @@ class OrderFoodRequest(BaseModel):
 class OrderFoodResponse(BaseModel):
     doordash_delivery_id: str
     status: str
+
+# --- Food recommender (Groq agent) ---
+class RecommendFoodRequest(BaseModel):
+    commits: List[str]  # list of raw commit messages (newest-first recommended)
+
+class RecommendFoodResponse(BaseModel):
+    mood: str           # one of: focused, energized, meh, stressed, celebratory, calm
+    food: str           # a single, concrete dish name
+    reasoning: Optional[str] = None
