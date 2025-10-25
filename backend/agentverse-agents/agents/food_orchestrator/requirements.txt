@@ -1,0 +1,6 @@
+# agents/food_orchestrator/requirements.txt
+uagents==0.*
+httpx~=0.27
+pydantic~=2.7
+chromadb
+sentence-transformers~=3.0
