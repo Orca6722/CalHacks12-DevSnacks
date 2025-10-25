@@ -17,7 +17,6 @@ CLIENT = Agent(
     seed="client-seed",
     mailbox="https://mailbox.fetch.ai",  # temporary mailbox relay
 )
-
 def print_commits(commits: List[str], label: str = "Recent commit messages"):
     if not commits:
         print("No commits found.")

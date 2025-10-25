@@ -1,4 +1,0 @@
-# agents/github_collector/requirements.txt
-uagents==0.* 
-httpx~=0.27
-pydantic~=2.7

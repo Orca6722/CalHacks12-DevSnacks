@@ -1,6 +1,0 @@
-# agents/mood_embedder/requirements.txt
-uagents==0.*
-groq==0.*            # official Groq Python SDK
-pydantic~=2.7
-chromadb
-sentence-transformers~=3.0
