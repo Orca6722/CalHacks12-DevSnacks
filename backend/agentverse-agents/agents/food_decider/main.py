@@ -48,15 +48,42 @@ def _to_bulleted(commits: List[str]) -> str:
 
 @proto.on_message(RecommendFoodRequest, replies=RecommendFoodResponse)
 async def handle_food(ctx: Context, msg: RecommendFoodRequest):
-    bulleted = _to_bulleted(msg.commits) if msg.commits else "- (no commits provided)"
+    # Delegate to the standalone recommender so the same logic can be used
+    # locally (no agent) or when invoked via the uagents protocol.
+    commits = msg.commits or []
+    out = recommend_food_from_commits(commits)
+    await ctx.send(ctx.sender, RecommendFoodResponse(mood=out.get("mood", "meh"), food=out.get("food", "margherita pizza"), reasoning=out.get("reasoning")))
+
+agent = Agent(name="food_decider", seed=os.getenv("SEED", "food-decider-seed"))
+agent.include(proto)
+
+# --- Local CLI demo (no agent network needed) ---
+def _demo(commits: List[str]):
+    bulleted = _to_bulleted(commits)
+    user = USER_TEMPLATE.format(bulleted=bulleted)
+    comp = groq_client.chat.completions.create(
+        model="llama-3.1-8b-instant",
+        messages=[{"role": "system", "content": SYS}, {"role": "user", "content": user}],
+        temperature=0.2,
+        max_tokens=200,
+        response_format={"type": "json_object"},
+    )
+    print(comp.choices[0].message.content)
+
+
+def recommend_food_from_commits(commits: List[str]) -> dict:
+    """Synchronous helper that accepts a list of commit messages (newest first)
+    and returns a dict with keys: mood, food, reasoning.
+
+    This extracts the core Groq completion logic so other processes can call it
+    directly without running the Agent network.
+    """
+    bulleted = _to_bulleted(commits) if commits else "- (no commits provided)"
     user = USER_TEMPLATE.format(bulleted=bulleted)
 
     comp = groq_client.chat.completions.create(
         model="llama-3.1-8b-instant",
-        messages=[
-            {"role": "system", "content": SYS},
-            {"role": "user", "content": user},
-        ],
+        messages=[{"role": "system", "content": SYS}, {"role": "user", "content": user}],
         temperature=0.2,
         max_tokens=200,
         response_format={"type": "json_object"},
@@ -77,23 +104,7 @@ async def handle_food(ctx: Context, msg: RecommendFoodRequest):
     if not food:
         food = "margherita pizza"
 
-    await ctx.send(ctx.sender, RecommendFoodResponse(mood=mood, food=food, reasoning=reasoning))
-
-agent = Agent(name="food_decider", seed=os.getenv("SEED", "food-decider-seed"))
-agent.include(proto)
-
-# --- Local CLI demo (no agent network needed) ---
-def _demo(commits: List[str]):
-    bulleted = _to_bulleted(commits)
-    user = USER_TEMPLATE.format(bulleted=bulleted)
-    comp = groq_client.chat.completions.create(
-        model="llama-3.1-8b-instant",
-        messages=[{"role": "system", "content": SYS}, {"role": "user", "content": user}],
-        temperature=0.2,
-        max_tokens=200,
-        response_format={"type": "json_object"},
-    )
-    print(comp.choices[0].message.content)
+    return {"mood": mood, "food": food, "reasoning": reasoning}
 
 if __name__ == "__main__":
     import sys
@@ -105,4 +116,8 @@ if __name__ == "__main__":
             "chore: update deployment docs",
         ])
     else:
-        agent.run()
+        # Running the Agent network is disabled by default in this module.
+        # The agent object is still defined above for compatibility, but
+        # we avoid starting it automatically so the module can be imported
+        # and the recommender function can be used directly by other code.
+        print("Agent-run disabled in this module. Use --demo for a local demo or call recommend_food_from_commits() from your app.")

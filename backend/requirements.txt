@@ -2,3 +2,10 @@ os
 httpx
 pydantic
 fastapi
+uvicorn
+requests
+PyJWT
+groq
+uagents
+typing-extensions
+python-dotenv
