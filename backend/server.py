@@ -244,28 +244,49 @@ async def run(req: RunRequest) -> RunResponse:
         return out
 
     # Merge pickup/dropoff with defaults if fields are missing
-    pickup_address        = req.pickup_address        or SAMPLE_PICKUP["pickup_address"]
-    pickup_business_name  = req.pickup_business_name  or SAMPLE_PICKUP["pickup_business_name"]
-    pickup_phone_number   = req.pickup_phone_number   or SAMPLE_PICKUP["pickup_phone_number"]
-    dropoff_address       = req.dropoff_address       or SAMPLE_DROPOFF["dropoff_address"]
-    contact_name          = req.contact_name          or SAMPLE_DROPOFF["contact_name"]
-    contact_phone         = req.contact_phone         or SAMPLE_DROPOFF["contact_phone"]
+    pickup_address        = (req.pickup_address or SAMPLE_PICKUP["pickup_address"]).strip()
+    pickup_business_name  = (req.pickup_business_name or SAMPLE_PICKUP["pickup_business_name"]).strip()
+    pickup_phone_number   = (req.pickup_phone_number or SAMPLE_PICKUP["pickup_phone_number"]).strip()
+    dropoff_address       = (req.dropoff_address or SAMPLE_DROPOFF["dropoff_address"]).strip()
+    contact_name          = (req.contact_name or SAMPLE_DROPOFF["contact_name"]).strip()
+    contact_phone         = (req.contact_phone or SAMPLE_DROPOFF["contact_phone"]).strip()
 
     dd = DoorDashClient(base_url=_dd_base_url(), creds=creds)
+
     try:
-        order_resp = dd.order_food_from_recommendation(
-            food_name=out.recommendation.get("food") if out.recommendation else "margherita pizza",
-            dropoff_address=dropoff_address,
-            contact_name=contact_name,
-            contact_phone=contact_phone,
+        # Build a minimal item list like app.py would
+        food_name = (out.recommendation or {}).get("food") or "margherita pizza"
+        items = [{
+            "name": food_name,
+            "quantity": 1,
+            "description": f"Mood-based recommendation: {food_name}",
+        }]
+
+        # >>> IMPORTANT: call create_delivery directly (no polling) <<<
+        created = dd.create_delivery(
+            external_delivery_id=None,
             pickup_address=pickup_address,
             pickup_business_name=pickup_business_name,
-            pickup_phone_number=pickup_phone_number,
-            poll=req.poll,
+            pickup_phone_number=contact_phone if pickup_phone_number == "" else pickup_phone_number,
+            dropoff_address=dropoff_address,
+            dropoff_business_name=contact_name,
+            dropoff_phone_number=contact_phone,
+            items=items,
+            # add optional fields if you want:
+            # order_value_cents=1999,
+            # pickup_instructions="Ask for to-go packaging",
+            # dropoff_instructions="Leave at the front desk",
+            # additional_fields={...},
         )
-        out.order_response = order_resp
-        out.order_url = _extract_order_url(order_resp)
-        out.note = f"DoorDash order created. Track here: {out.order_url}" if out.order_url else "DoorDash order created."
+
+        # Return EXACTLY the JSON DoorDash returned from create_delivery
+        out.order_response = created
+
+        # Best-effort link extraction (may not be present immediately)
+        # If your _extract_order_url expects {"raw": ...}, wrap it:
+        out.order_url = _extract_order_url({"raw": created})
+
+        out.note = "DoorDash create_delivery called (no polling)."
     except Exception as e:
         out.note = f"DoorDash error: {e}"
 
