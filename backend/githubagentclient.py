@@ -1,54 +1,63 @@
 # github_commits_client.py
 import asyncio
-import json
+from typing import List, Optional
 from uagents import Agent, Context, Model
-from typing import List
 
-class Chat(Model):
-    text: str
-
+# ===== Models (must match agent) =====
 class CommitData(Model):
     commits: List[str]
 
+class UserCommitsQuery(Model):
+    username: str
+    token: str
+    since_iso: Optional[str] = None
+    per_page: Optional[int] = 20
+
+# ===== Config =====
 REMOTE_ADDR = "agent1qgj6hulwjjkmmu7dr6jwh0drwuayjehcmtuhg8lf2v9ttsw6lu4w6j77v88"
 
 CLIENT = Agent(
     name="github_commits_client",
     seed="client-seed",
-    mailbox="https://mailbox.fetch.ai",  # temporary mailbox relay
+    mailbox="https://mailbox.fetch.ai",  # temporary relay
 )
-def print_commits(commits: List[str], label: str = "Recent commit messages"):
-    if not commits:
-        print("No commits found.")
-        return
-    print(f"\n{label}:")
-    print("------------------------")
-    for i, m in enumerate(commits[:20], 1):
-        print(f"{i:02d}. {m.splitlines()[0]}")
 
-async def query_once(ctx: Context, github_url: str):
+# ===== Logic =====
+async def query_once(ctx: Context, username: str, token: str, since_iso: Optional[str] = None):
     resp, msgstatus = await ctx.send_and_receive(
-        REMOTE_ADDR, Chat(text=github_url), CommitData, timeout=45.0
+        REMOTE_ADDR,
+        UserCommitsQuery(username=username, token=token, since_iso=since_iso, per_page=20),
+        CommitData,
+        timeout=45.0,
     )
 
     if isinstance(resp, CommitData):
         print(resp)
-        return resp
+        return
 
-    ctx.logger.error(f"Received unexpected response: {resp}")
-    print("Request failed; see logs above.")
+    ctx.logger.error(f"Unexpected response: {resp}")
 
 @CLIENT.on_event("startup")
 async def interactive(ctx: Context):
-    await asyncio.sleep(1.5)  # let the mailbox register
-    print("Client is running. Paste GitHub repo URLs (blank line to quit).")
+    await asyncio.sleep(1.5)  # wait for mailbox registration
+    print("GitHub User Commits — enter details (blank username to quit).")
     while True:
-        url = await asyncio.to_thread(input, "GitHub URL: ")
-        url = (url or "").strip()
-        if not url:
+        username = await asyncio.to_thread(input, "GitHub username: ")
+        username = (username or "").strip()
+        if not username:
             print("Goodbye.")
             break
-        await query_once(ctx, url)
+
+        token = await asyncio.to_thread(input, "GitHub token (PAT) [required]: ")
+        token = (token or "").strip()
+        if not token:
+            print("❌ Token is required.")
+            continue
+
+        # since_iso = await asyncio.to_thread(input, "Since (ISO 8601, e.g. 2025-10-01T00:00:00Z) [optional]: ")
+        # since_iso = (since_iso or "").strip() or None
+
+        await query_once(ctx, username=username, token=token) # since_iso = since_iso
 
 if __name__ == "__main__":
     CLIENT.run()
