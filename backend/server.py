@@ -29,6 +29,16 @@ class RunResponse(BaseModel):
 
 app = FastAPI(title="User Commits API")
 
+from fastapi.middleware.cors import CORSMiddleware
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],          # dev: wide open; tighten to ["chrome-extension://<YOUR_ID>"] later
+    allow_credentials=False,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 async def call_agent_once(username: str, token: str, since_iso: Optional[str]) -> List[str]:
     """
     Spin up a fresh uAgents client (configured like your working script),

@@ -1,0 +1,16 @@
+{
+  "manifest_version": 3,
+  "name": "Mood Food",
+  "version": "1.0",
+  "description": "Analyze your GitHub mood and get a matching food recommendation!",
+  "action": {
+    "default_popup": "index.html",
+    "default_icon": {
+      "16": "icon16.png",
+      "48": "icon48.png",
+      "128": "icon128.png"
+    }
+  },
+  "permissions": ["storage", "activeTab", "scripting"],
+  "host_permissions": ["http://127.0.0.1:8000/*"]
+}
