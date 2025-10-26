@@ -3,9 +3,9 @@ import json
 from typing import List, Optional
 from uagents import Agent, Context, Protocol
 from groq import Groq
-from shared.schemas import RecommendFoodRequest, RecommendFoodResponse
+from ...shared.schemas import RecommendFoodRequest, RecommendFoodResponse
 
-GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+GROQ_API_KEY = "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"
 if not GROQ_API_KEY:
     raise RuntimeError("GROQ_API_KEY is required")
 

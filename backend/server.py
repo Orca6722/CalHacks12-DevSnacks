@@ -1,13 +1,17 @@
 import os
 import asyncio
 import threading
-from typing import List, Optional, Tuple
+from typing import List, Optional, Tuple, Dict
 from concurrent.futures import Future
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from uagents import Agent, Context, Model
+
+# ---- explicit local imports (no heuristics) ---------------------------------
+from agentverse.agents.food_decider.main import recommend_food_from_commits
+from doordash import DoorDashClient, DoorDashCreds
 
 # ====== CONFIG ======
 REMOTE_ADDR = "agent1qgj6hulwjjkmmu7dr6jwh0drwuayjehcmtuhg8lf2v9ttsw6lu4w6j77v88"
@@ -33,9 +37,21 @@ class UserCommitsQuery(Model):
 class RunRequest(BaseModel):
     username: str
     token: str
+    # optional delivery fields (backend has sane defaults if omitted)
+    dropoff_address: Optional[str] = None
+    contact_name: Optional[str] = None
+    contact_phone: Optional[str] = None
+    pickup_address: Optional[str] = None
+    pickup_business_name: Optional[str] = None
+    pickup_phone_number: Optional[str] = None
+    poll: bool = True  # poll DoorDash to terminal status by default
 
 class RunResponse(BaseModel):
     commits: List[str]
+    recommendation: Dict | None = None
+    order_response: Dict | None = None
+    order_url: str | None = None
+    note: str | None = None
 
 app = FastAPI(title="User Commits API")
 
@@ -48,8 +64,42 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ====== Background client agent infrastructure ======
-# We run ONE client agent in its own thread/loop and push requests via an asyncio.Queue inside that loop.
+# --- sane defaults + creds sourcing ------------------------------------------
+SAMPLE_PICKUP = {
+    "pickup_address": "901 Market St, San Francisco, CA 94103",
+    "pickup_business_name": "Demo Restaurant",
+    "pickup_phone_number": "+14155550123",  # E.164
+}
+SAMPLE_DROPOFF = {
+    "dropoff_address": "1355 Market St, San Francisco, CA 94103",
+    "contact_name": "Demo Customer",
+    "contact_phone": "+14155550124",  # E.164
+}
+
+def _dd_creds_from_env_or_defaults() -> Optional[DoorDashCreds]:
+    dev = "a4128903-af33-4ee0-9b6f-2beacca10227"
+    kid = "607ba3b5-e79f-446d-8af8-6a883a3626ec"
+    sec = "lPHMRmf6_nXBMf-P-Y_rLMfqaH4_PWu2ntAG3GsA8Tk"
+    if not (dev and kid and sec):
+        return None
+    return DoorDashCreds(developer_id=dev, key_id=kid, signing_secret=sec)
+
+def _dd_base_url() -> str:
+    return os.getenv("DOORDASH_BASE_URL", "https://openapi.doordash.com/drive/v2").rstrip("/")
+
+def _extract_order_url(order_resp: Optional[Dict]) -> Optional[str]:
+    if not order_resp:
+        return None
+    raw = order_resp.get("raw") or {}
+    return (
+        raw.get("tracking_url")
+        or raw.get("external_tracking_url")
+        or raw.get("order_tracking_url")
+        or raw.get("order_url")
+        or None
+    )
+
+# ====== Background client agent infrastructure ===============================
 AGENT_THREAD: Optional[threading.Thread] = None
 AGENT_LOOP: Optional[asyncio.AbstractEventLoop] = None
 REQ_Q: Optional[asyncio.Queue] = None           # queue of (username, token, since_iso, future)
@@ -67,7 +117,7 @@ def agent_thread_main():
     try:
         client = Agent(
             name="github_commits_client",
-            seed="client-seed",                  # keep stable if you've created a mailbox for this address
+            seed="client-seed",
             mailbox="https://mailbox.fetch.ai",
             loop=loop,
             register=False,
@@ -81,7 +131,6 @@ def agent_thread_main():
             loop=loop,
             port=0,
         )
-        # Best-effort: ensure no endpoints are advertised / no HTTP is forced
         for attr in ("endpoints", "_endpoints"):
             if hasattr(client, attr):
                 try:
@@ -106,35 +155,29 @@ def agent_thread_main():
             try:
                 resp, _ = await ctx.send_and_receive(
                     REMOTE_ADDR,
-                    UserCommitsQuery(
-                        username=username, token=token, since_iso=since_iso, per_page=20
-                    ),
+                    UserCommitsQuery(username=username, token=token, since_iso=since_iso, per_page=20),
                     CommitData,
                     timeout=75.0,
                 )
                 commits = resp.commits if isinstance(resp, CommitData) else []
                 fut.set_result(commits or [])
-            except Exception as e:
+            except Exception:
                 fut.set_result([])  # never bubble errors to the API; return empty list
             finally:
                 REQ_Q.task_done()
 
     @client.on_event("startup")
     async def on_start(ctx: Context):
-        # Give mailbox a moment to fully establish
         await asyncio.sleep(1.0)
         loop.create_task(worker(ctx))
 
     @client.on_event("shutdown")
     async def on_stop(ctx: Context):
-        # drain queue if needed
         pass
 
-    # Block this thread in the agent run loop
     try:
         client.run()
     finally:
-        # Clean loop on exit
         pending = asyncio.all_tasks(loop=loop)
         for t in pending:
             t.cancel()
@@ -142,52 +185,88 @@ def agent_thread_main():
             loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
         loop.close()
 
-
-# FastAPI lifespan: start/stop the client thread
 @app.on_event("startup")
 async def _startup():
     global AGENT_THREAD
     if AGENT_THREAD is None or not AGENT_THREAD.is_alive():
         AGENT_THREAD = threading.Thread(target=agent_thread_main, daemon=True)
         AGENT_THREAD.start()
-    # Wait for the agent to signal readiness (mailbox connected, worker running)
     await asyncio.get_running_loop().run_in_executor(None, STARTED.wait)
 
 @app.on_event("shutdown")
 async def _shutdown():
-    # Ask worker to stop and ask agent to exit (if server exists)
     if AGENT_LOOP and REQ_Q:
         try:
-            # Stop worker
             asyncio.run_coroutine_threadsafe(REQ_Q.put(None), AGENT_LOOP).result(5)
         except Exception:
             pass
-        # Try to stop agent internal server if present
-        # (We can't access ctx here; client.run() will exit when process ends since it's daemon thread.)
 
-# ====== Public endpoint (unchanged shape) ======
+# ====== Helper to call the agent once ========================================
 async def call_agent_once(username: str, token: str, since_iso: Optional[str]) -> List[str]:
-    """
-    Enqueue a request to the background agent and await the result.
-    """
     if not (AGENT_LOOP and REQ_Q and STARTED.is_set()):
-        # Background agent not ready (shouldn't happen after startup)
         return []
-
-    # Use a thread-safe Future; await via asyncio.wrap_future in this loop
     fut: Future = Future()
     try:
-        # Put work item into the agent loop's queue
         put_f = asyncio.run_coroutine_threadsafe(REQ_Q.put((username, token, since_iso, fut)), AGENT_LOOP)
         put_f.result(timeout=5)
-        # Await the result with a timeout from FastAPI's loop
         return await asyncio.wait_for(asyncio.wrap_future(fut), timeout=80.0)
     except asyncio.TimeoutError:
         return []
     except Exception:
         return []
 
+# ====== Public endpoint: run full pipeline after call_agent_once =============
 @app.post("/api/run", response_model=RunResponse)
 async def run(req: RunRequest) -> RunResponse:
+    # 1) existing agent pipeline (unchanged)
     commits = await call_agent_once(req.username, req.token, None)
-    return RunResponse(commits=commits)
+
+    out = RunResponse(
+        commits=commits or [],
+        recommendation=None,
+        order_response=None,
+        order_url=None,
+        note=None,
+    )
+
+    # 2) use commit history -> recommend a food (explicit import from main.py)
+    try:
+        recommendation = recommend_food_from_commits(out.commits)
+        out.recommendation = recommendation
+    except Exception as e:
+        out.note = f"Recommender error: {e}"
+        return out
+
+    # 3) order via DoorDash (explicit import from doordash.py)
+    creds = _dd_creds_from_env_or_defaults()
+    if not creds:
+        out.note = "DoorDash creds missing; skipped ordering."
+        return out
+
+    # Merge pickup/dropoff with defaults if fields are missing
+    pickup_address        = req.pickup_address        or SAMPLE_PICKUP["pickup_address"]
+    pickup_business_name  = req.pickup_business_name  or SAMPLE_PICKUP["pickup_business_name"]
+    pickup_phone_number   = req.pickup_phone_number   or SAMPLE_PICKUP["pickup_phone_number"]
+    dropoff_address       = req.dropoff_address       or SAMPLE_DROPOFF["dropoff_address"]
+    contact_name          = req.contact_name          or SAMPLE_DROPOFF["contact_name"]
+    contact_phone         = req.contact_phone         or SAMPLE_DROPOFF["contact_phone"]
+
+    dd = DoorDashClient(base_url=_dd_base_url(), creds=creds)
+    try:
+        order_resp = dd.order_food_from_recommendation(
+            food_name=out.recommendation.get("food") if out.recommendation else "margherita pizza",
+            dropoff_address=dropoff_address,
+            contact_name=contact_name,
+            contact_phone=contact_phone,
+            pickup_address=pickup_address,
+            pickup_business_name=pickup_business_name,
+            pickup_phone_number=pickup_phone_number,
+            poll=req.poll,
+        )
+        out.order_response = order_resp
+        out.order_url = _extract_order_url(order_resp)
+        out.note = f"DoorDash order created. Track here: {out.order_url}" if out.order_url else "DoorDash order created."
+    except Exception as e:
+        out.note = f"DoorDash error: {e}"
+
+    return out
